@@ -1,0 +1,1 @@
+"""Rotas HTML server-rendered."""

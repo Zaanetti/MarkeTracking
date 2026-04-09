@@ -1,0 +1,1 @@
+"""Processamento assincrono da aplicacao."""
