@@ -1,57 +1,242 @@
 {% extends "base.html" %}
 
 {% block content %}
-  <main class="hero">
-    <section class="hero-copy">
-      <p class="eyebrow">Scaffold inicial</p>
+  <main class="intake">
+    <section class="intake-card intake-flow">
       <h1>{{ app_name }}</h1>
-      <p class="lead">
-        Base pronta para evoluir a pipeline de upload, leitura de QRCode, OCR de fallback
-        e extracao estruturada dos itens do cupom fiscal.
+      <p class="intake-lead">
+        Anexe a imagem do cupom. Assim que um QR Code for encontrado, a coleta das
+        informacoes da NFC-e fica liberada.
       </p>
 
-      <div class="status-row">
-        <span class="chip">ambiente: {{ environment }}</span>
-        <span class="chip">fase: fundacao tecnica</span>
-      </div>
-    </section>
+      <form class="receipt-form" id="receipt-form" novalidate>
+        <div class="field">
+          <span>Imagem do cupom</span>
+          <label class="upload-picker" for="receipt-image">
+            <span class="upload-button">Anexar imagem</span>
+            <span class="upload-filename" id="upload-filename">Nenhuma imagem selecionada</span>
+          </label>
+          <input
+            id="receipt-image"
+            class="visually-hidden"
+            type="file"
+            name="receipt_image"
+            accept="image/*"
+          />
+        </div>
+      </form>
 
-    <section class="panel">
-      <h2>Stack definida</h2>
-      <ul class="stack-list">
-        {% for item in stack_items %}
-          <li>{{ item }}</li>
-        {% endfor %}
-      </ul>
+      <section class="status-panel{% if qr_status %} is-{{ qr_status.tone }}{% endif %}" id="qr-status-panel">
+        <p class="status-eyebrow">Status do QR</p>
+        <p class="status-message" id="qr-status-message">
+          {% if qr_status %}
+            {{ qr_status.message }}
+          {% else %}
+            Aguarde a leitura da imagem para descobrir se o QR Code foi localizado.
+          {% endif %}
+        </p>
+        <code class="qr-preview{% if not detected_qr_code %} is-empty{% endif %}" id="qr-preview">
+          {{ detected_qr_code or "Nenhum QR identificado ainda." }}
+        </code>
+      </section>
+
+      <form
+        class="collect-form"
+        method="post"
+        action="{{ request.url_for('collect_receipt_info') }}"
+      >
+        <input id="qr-code-input" type="hidden" name="qr_code" value="{{ detected_qr_code }}" />
+        <button
+          class="primary-action"
+          id="collect-button"
+          type="submit"
+          {% if not detected_qr_code %}disabled{% endif %}
+        >
+          Coletar infos
+        </button>
+      </form>
+
+      {% if collection_error %}
+        <section class="feedback-card is-error">
+          <h2>Falha na coleta</h2>
+          <p>{{ collection_error }}</p>
+        </section>
+      {% endif %}
+
+      {% if receipt_data %}
+        <section class="results-shell">
+          <article class="feedback-card">
+            <p class="status-eyebrow">Resumo da NFC-e</p>
+            <h2>{{ receipt_data.merchant_name }}</h2>
+            <p class="result-meta">
+              CNPJ {{ receipt_data.merchant_tax_id }}<br />
+              {{ receipt_data.merchant_address }}
+            </p>
+
+            <dl class="summary-grid">
+              <div>
+                <dt>Numero / Serie</dt>
+                <dd>{{ receipt_data.document_number }} / {{ receipt_data.document_series }}</dd>
+              </div>
+              <div>
+                <dt>Emissao</dt>
+                <dd>{{ receipt_data.issue_datetime }}</dd>
+              </div>
+              <div>
+                <dt>Total</dt>
+                <dd>R$ {{ receipt_data.total_amount }}</dd>
+              </div>
+              <div>
+                <dt>Tributos</dt>
+                <dd>R$ {{ receipt_data.total_taxes }}</dd>
+              </div>
+              <div>
+                <dt>Itens</dt>
+                <dd>{{ receipt_data.total_items }}</dd>
+              </div>
+              <div>
+                <dt>Consumidor</dt>
+                <dd>{{ receipt_data.consumer_description }}</dd>
+              </div>
+            </dl>
+          </article>
+
+          <article class="feedback-card">
+            <h2>Itens coletados</h2>
+            <div class="table-wrap">
+              <table class="results-table">
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>Codigo</th>
+                    <th>Descricao</th>
+                    <th>Qtd.</th>
+                    <th>Un.</th>
+                    <th>Vl. unit.</th>
+                    <th>Vl. total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for item in receipt_data["items"] %}
+                    <tr>
+                      <td>{{ item.line_number }}</td>
+                      <td>{{ item.product_code or "-" }}</td>
+                      <td>{{ item.description }}</td>
+                      <td>{{ item.quantity }}</td>
+                      <td>{{ item.unit }}</td>
+                      <td>{{ item.unit_price }}</td>
+                      <td>{{ item.total_price }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="results-grid">
+            <section class="feedback-card">
+              <h2>Pagamentos</h2>
+              <ul class="detail-list">
+                {% for payment in receipt_data["payments"] %}
+                  <li>
+                    <strong>{{ payment.payment_method }}</strong>
+                    <span>{{ payment.amount or "Nao informado" }}</span>
+                  </li>
+                {% endfor %}
+              </ul>
+            </section>
+
+            <section class="feedback-card">
+              <h2>Metadados</h2>
+              <ul class="detail-list">
+                <li>
+                  <strong>Chave</strong>
+                  <span>{{ receipt_data.access_key }}</span>
+                </li>
+                <li>
+                  <strong>Protocolo</strong>
+                  <span>{{ receipt_data.authorization_protocol }}</span>
+                </li>
+                <li>
+                  <strong>Autorizacao</strong>
+                  <span>{{ receipt_data.authorization_datetime }}</span>
+                </li>
+                <li>
+                  <strong>Versoes</strong>
+                  <span>XML {{ receipt_data.xml_version }} / XSLT {{ receipt_data.xslt_version }}</span>
+                </li>
+              </ul>
+            </section>
+
+            <section class="feedback-card">
+              <h2>Informacoes complementares</h2>
+              <ul class="detail-list detail-list-stack">
+                {% for info in receipt_data["additional_info"] %}
+                  <li>{{ info }}</li>
+                {% endfor %}
+              </ul>
+            </section>
+          </article>
+        </section>
+      {% endif %}
     </section>
   </main>
 
-  <section class="grid">
-    <article class="card">
-      <h3>Fluxo planejado</h3>
-      <p>Imagem ou chave manual -> referencia do cupom -> consulta da pagina -> parser -> itens normalizados.</p>
-    </article>
+  <script>
+    const fileInput = document.getElementById("receipt-image");
+    const fileName = document.getElementById("upload-filename");
+    const statusPanel = document.getElementById("qr-status-panel");
+    const statusMessage = document.getElementById("qr-status-message");
+    const qrPreview = document.getElementById("qr-preview");
+    const qrCodeInput = document.getElementById("qr-code-input");
+    const collectButton = document.getElementById("collect-button");
+    const checkUrl = "{{ request.url_for('check_receipt_qr') }}";
 
-    <article class="card">
-      <h3>Persistencia</h3>
-      <p>PostgreSQL para entidades principais e JSONB para manter o payload bruto e facilitar evolucao do parser.</p>
-    </article>
+    function applyStatus(message, tone, qrValue) {
+      statusPanel.classList.remove("is-success", "is-error", "is-loading");
+      if (tone) {
+        statusPanel.classList.add(`is-${tone}`);
+      }
 
-    <article class="card">
-      <h3>Storage</h3>
-      <p>MinIO local para desenvolvimento, com caminho aberto para S3 sem mudar a arquitetura da aplicacao.</p>
-    </article>
-  </section>
+      statusMessage.textContent = message;
+      qrPreview.textContent = qrValue || "Nenhum QR identificado ainda.";
+      qrPreview.classList.toggle("is-empty", !qrValue);
+      qrCodeInput.value = qrValue || "";
+      collectButton.disabled = !qrValue;
+    }
 
-  <section class="roadmap">
-    <div class="panel">
-      <h2>Proximo corte</h2>
-      <ol>
-        <li>Receber imagem e entrada manual.</li>
-        <li>Salvar submissao e arquivo original.</li>
-        <li>Ler QRCode e usar OCR como fallback.</li>
-        <li>Extrair dados da pagina e persistir recibos e itens.</li>
-      </ol>
-    </div>
-  </section>
+    if (qrCodeInput.value) {
+      qrPreview.classList.remove("is-empty");
+      collectButton.disabled = false;
+    }
+
+    fileInput.addEventListener("change", async () => {
+      const [selectedFile] = fileInput.files;
+      fileName.textContent = selectedFile ? selectedFile.name : "Nenhuma imagem selecionada";
+      applyStatus("Analisando a imagem em busca do QR Code...", "loading", "");
+
+      if (!selectedFile) {
+        applyStatus(
+          "Aguarde a leitura da imagem para descobrir se o QR Code foi localizado.",
+          "",
+          "",
+        );
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("receipt_image", selectedFile);
+
+      try {
+        const response = await fetch(checkUrl, {
+          method: "POST",
+          body: formData,
+        });
+        const payload = await response.json();
+        applyStatus(payload.message, payload.found ? "success" : "error", payload.qr_code || "");
+      } catch (error) {
+        applyStatus("Nao foi possivel validar a imagem agora. Tente novamente.", "error", "");
+      }
+    });
+  </script>
 {% endblock %}

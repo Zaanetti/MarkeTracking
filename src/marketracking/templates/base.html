@@ -8,6 +8,13 @@
   </head>
   <body>
     <div class="page-shell">
+      <header class="topbar">
+        <a class="brandmark" href="{{ request.url_for('home') }}">{{ app_name }}</a>
+        <nav class="topnav">
+          <a href="{{ request.url_for('home') }}">Home</a>
+          <a href="{{ request.url_for('about') }}">About</a>
+        </nav>
+      </header>
       {% block content %}{% endblock %}
     </div>
   </body>

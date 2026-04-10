@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <main class="hero">
+    <section class="hero-copy">
+      <p class="eyebrow">Scaffold inicial</p>
+      <h1>{{ app_name }}</h1>
+      <p class="lead">
+        Base pronta para evoluir a pipeline de upload, leitura de QRCode, OCR de fallback
+        e extracao estruturada dos itens do cupom fiscal.
+      </p>
+
+      <div class="status-row">
+        <span class="chip">ambiente: {{ environment }}</span>
+        <span class="chip">fase: fundacao tecnica</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Stack definida</h2>
+      <ul class="stack-list">
+        {% for item in stack_items %}
+          <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+  </main>
+
+  <section class="grid">
+    <article class="card">
+      <h3>Fluxo planejado</h3>
+      <p>Imagem ou chave manual -> referencia do cupom -> consulta da pagina -> parser -> itens normalizados.</p>
+    </article>
+
+    <article class="card">
+      <h3>Persistencia</h3>
+      <p>PostgreSQL para entidades principais e JSONB para manter o payload bruto e facilitar evolucao do parser.</p>
+    </article>
+
+    <article class="card">
+      <h3>Storage</h3>
+      <p>MinIO local para desenvolvimento, com caminho aberto para S3 sem mudar a arquitetura da aplicacao.</p>
+    </article>
+  </section>
+
+  <section class="roadmap">
+    <div class="panel">
+      <h2>Proximo corte</h2>
+      <ol>
+        <li>Receber imagem e entrada manual.</li>
+        <li>Salvar submissao e arquivo original.</li>
+        <li>Ler QRCode e usar OCR como fallback.</li>
+        <li>Extrair dados da pagina e persistir recibos e itens.</li>
+      </ol>
+    </div>
+  </section>
+{% endblock %}
