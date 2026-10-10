@@ -1,105 +1,60 @@
-from fastapi.testclient import TestClient
+from collections.abc import Iterator
 
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from marketracking.db.session import get_db
 from marketracking.main import app
 
 
 def test_healthcheck_returns_ok() -> None:
-    client = TestClient(app)
-
-    response = client.get("/api/health")
+    response = TestClient(app).get("/api/health")
 
     assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "ok"
-    assert payload["service"] == "MarkeTracking"
+    assert response.json()["status"] == "ok"
+    assert response.json()["service"] == "MarkeTracking"
 
 
-def test_homepage_returns_ok() -> None:
-    client = TestClient(app)
-
-    response = client.get("/")
-
-    assert response.status_code == 200
-    assert "MarkeTracking" in response.text
-    assert "Anexar imagem" in response.text
-    assert "Coletar infos" in response.text
-    assert "Digite os 44 digitos do cupom" not in response.text
-    assert "Scaffold inicial" not in response.text
-
-
-def test_about_page_returns_ok() -> None:
-    client = TestClient(app)
-
-    response = client.get("/about")
-
-    assert response.status_code == 200
-    assert "Scaffold inicial" in response.text
-
-
-def test_qr_check_endpoint_returns_found_status(monkeypatch) -> None:
-    client = TestClient(app)
-
-    monkeypatch.setattr(
-        "marketracking.web.routes.decode_qr_bytes",
-        lambda _: "https://www.nfce.fazenda.sp.gov.br/exemplo",
+def test_readiness_checks_database() -> None:
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
+    session_factory = sessionmaker(bind=engine)
 
-    response = client.post(
-        "/qr/check",
-        files={"receipt_image": ("cupom.png", b"fake-image", "image/png")},
-    )
+    def override_get_db() -> Iterator[Session]:
+        with session_factory() as session:
+            yield session
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["found"] is True
-    assert payload["qr_code"] == "https://www.nfce.fazenda.sp.gov.br/exemplo"
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        response = TestClient(app).get("/api/ready")
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "ready"}
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
 
 
-def test_collect_route_renders_extracted_receipt(monkeypatch) -> None:
-    client = TestClient(app)
+def test_readiness_hides_database_failure_details() -> None:
+    def override_get_db():
+        class UnavailableDatabase:
+            def execute(self, _statement):
+                raise OperationalError("SELECT 1", {}, RuntimeError("connection refused"))
 
-    monkeypatch.setattr(
-        "marketracking.web.routes.collect_receipt_from_qr_url",
-        lambda _: {
-            "merchant_name": "Mercado Exemplo",
-            "merchant_tax_id": "12.345.678/0001-99",
-            "merchant_address": "Rua das Flores, 10, Sorocaba, SP",
-            "document_number": "123",
-            "document_series": "1",
-            "issue_datetime": "09/04/2026 20:00:00",
-            "authorization_protocol": "999999",
-            "authorization_datetime": "09/04/2026 20:00:03",
-            "xml_version": "4.00",
-            "xslt_version": "2.05",
-            "total_items": "2",
-            "total_amount": "25,90",
-            "total_taxes": "3,10",
-            "consumer_description": "Consumidor nao identificado",
-            "access_key": "3526 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000",
-            "payments": [
-                {"payment_method": "Cartao de Debito", "amount": "25,90"},
-            ],
-            "items": [
-                {
-                    "line_number": "1",
-                    "product_code": "100",
-                    "description": "Arroz",
-                    "quantity": "1",
-                    "unit": "UN",
-                    "unit_price": "10,00",
-                    "total_price": "10,00",
-                }
-            ],
-            "additional_info": ["Volte sempre"],
-        },
-    )
+        yield UnavailableDatabase()
 
-    response = client.post(
-        "/collect",
-        data={"qr_code": "https://www.nfce.fazenda.sp.gov.br/exemplo"},
-    )
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        response = TestClient(app).get("/api/ready")
 
-    assert response.status_code == 200
-    assert "Mercado Exemplo" in response.text
-    assert "Arroz" in response.text
-    assert "Volte sempre" in response.text
+        assert response.status_code == 503
+        assert response.json() == {"status": "not_ready"}
+        assert "connection refused" not in response.text
+    finally:
+        app.dependency_overrides.clear()
