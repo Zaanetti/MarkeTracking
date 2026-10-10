@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup, Tag
@@ -94,7 +95,7 @@ class SefazSpNfceParser:
                 "A tabela de itens ou totais não foi encontrada na página fiscal.",
             )
         items = self._parse_items(item_table)
-        totals = self._parse_totals(totals_node)
+        totals = self._parse_totals(totals_node, items)
         return RawNfceDocument(
             merchant_name=merchant_name,
             merchant_cnpj=merchant_cnpj,
@@ -209,7 +210,11 @@ class SefazSpNfceParser:
             raise _failure(ErrorCode.MISSING_REQUIRED_DATA, "A NFC-e não contém itens legíveis.")
         return items
 
-    def _parse_totals(self, totals_node: Tag) -> dict[str, str | None]:
+    def _parse_totals(
+        self,
+        totals_node: Tag,
+        items: list[RawPurchaseItem],
+    ) -> dict[str, str | None]:
         fields: dict[str, str | None] = {
             "declared_line_count": None,
             "gross_items_amount": None,
@@ -241,6 +246,8 @@ class SefazSpNfceParser:
 
         if fields["total_discount"] is None:
             fields["total_discount"] = "0"
+        if fields["gross_items_amount"] is None:
+            fields["gross_items_amount"] = _sum_item_totals(items)
         required = ("declared_line_count", "gross_items_amount", "payable_amount")
         if any(fields[name] is None for name in required):
             raise _failure(
@@ -268,6 +275,22 @@ def _last_number(value: str) -> str | None:
 def _strip_label(value: str, label: str) -> str:
     cleaned = clean_text(value)
     return re.sub(rf"^{re.escape(label)}\s*:?\s*", "", cleaned, flags=re.IGNORECASE).strip()
+
+
+def _sum_item_totals(items: list[RawPurchaseItem]) -> str:
+    amounts: list[Decimal] = []
+    for item in items:
+        value = clean_text(item.line_total)
+        normalized = value.replace(".", "").replace(",", ".") if "," in value else value
+        try:
+            amounts.append(Decimal(normalized))
+        except InvalidOperation as exc:
+            raise _failure(
+                ErrorCode.PARSER_LAYOUT_CHANGED,
+                "O valor bruto não aparece no resumo e não pôde ser calculado pelos itens.",
+            ) from exc
+    total = sum(amounts, Decimal("0.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return format(total, ".2f").replace(".", ",")
 
 
 def _failure(code: ErrorCode, message: str) -> ProcessingFailure:

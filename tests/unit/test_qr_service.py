@@ -31,6 +31,10 @@ def test_rejects_image_over_size_limit() -> None:
 
 def test_reports_image_without_qr(monkeypatch) -> None:
     monkeypatch.setattr("marketracking.services.qr_service.decode", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        "marketracking.services.qr_service.zxingcpp.read_barcodes",
+        lambda *_args, **_kwargs: [],
+    )
 
     with pytest.raises(ProcessingFailure) as error:
         decode_qr_bytes(png_bytes())
@@ -52,6 +56,33 @@ def test_returns_one_qr_payload_and_safe_image_metadata(monkeypatch) -> None:
     assert result.image.width == 48
     assert result.image.height == 32
     assert len(result.image.sha256) == 64
+
+
+def test_uses_zxing_when_legacy_decoder_finds_no_code(monkeypatch) -> None:
+    payload = "https://www.nfce.fazenda.sp.gov.br/qrcode?p=opaque"
+    monkeypatch.setattr("marketracking.services.qr_service.decode", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        "marketracking.services.qr_service.zxingcpp.read_barcodes",
+        lambda *_args, **_kwargs: [SimpleNamespace(text=payload)],
+    )
+
+    result = decode_qr_bytes(png_bytes())
+
+    assert result.url == payload
+
+
+def test_rejects_multiple_qrs_found_by_zxing(monkeypatch) -> None:
+    symbols = [SimpleNamespace(text="first"), SimpleNamespace(text="second")]
+    monkeypatch.setattr("marketracking.services.qr_service.decode", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        "marketracking.services.qr_service.zxingcpp.read_barcodes",
+        lambda *_args, **_kwargs: symbols,
+    )
+
+    with pytest.raises(ProcessingFailure) as error:
+        decode_qr_bytes(png_bytes())
+
+    assert error.value.code == ErrorCode.MULTIPLE_QR_CODES
 
 
 def test_rejects_multiple_qrs(monkeypatch) -> None:

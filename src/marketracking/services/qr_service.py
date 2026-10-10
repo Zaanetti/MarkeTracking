@@ -7,6 +7,7 @@ from io import BytesIO
 
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, UnidentifiedImageError
 from pyzbar.pyzbar import ZBarSymbol, decode
+import zxingcpp
 
 from marketracking.schemas.nfce import ErrorCode, ProcessingState
 from marketracking.services.errors import ProcessingFailure
@@ -87,6 +88,10 @@ def decode_qr_bytes(
                     payload = result.data.decode("utf-8", errors="strict").strip()
                     if payload:
                         payloads.add(payload)
+            if not payloads:
+                fallback_payloads, fallback_multiple = _decode_with_zxing(image)
+                payloads.update(fallback_payloads)
+                multiple_in_variant = multiple_in_variant or fallback_multiple
     except UnicodeDecodeError as exc:
         raise ProcessingFailure(
             ErrorCode.QR_UNDECODABLE,
@@ -122,6 +127,31 @@ def decode_qr_bytes(
             ProcessingState.DECODING_QR,
         )
     return QrDecodeResult(url=next(iter(payloads)), image=metadata)
+
+
+def _decode_with_zxing(image: Image.Image) -> tuple[set[str], bool]:
+    gray = ImageOps.autocontrast(ImageOps.grayscale(image))
+    variants = (
+        image.convert("RGB"),
+        gray,
+        gray.filter(ImageFilter.UnsharpMask(radius=2, percent=180, threshold=3)),
+    )
+    payloads: set[str] = set()
+    multiple = False
+    for variant in variants:
+        for binarizer in (zxingcpp.Binarizer.LocalAverage, zxingcpp.Binarizer.GlobalHistogram):
+            results = zxingcpp.read_barcodes(
+                variant,
+                formats=zxingcpp.BarcodeFormat.QRCode,
+                binarizer=binarizer,
+            )
+            if len(results) > 1:
+                multiple = True
+            for result in results:
+                payload = result.text.strip()
+                if payload:
+                    payloads.add(payload)
+    return payloads, multiple
 
 
 def inspect_image(

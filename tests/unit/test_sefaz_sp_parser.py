@@ -29,6 +29,18 @@ def test_missing_store_product_code_does_not_drop_purchase_item(sefaz_html: str)
     assert document.items[0].store_product_code is None
 
 
+def test_derives_gross_total_from_items_when_portal_omits_summary(sefaz_html: str) -> None:
+    html = sefaz_html.replace(
+        '<div><label>Valor total R$:</label><span class="totalNumb">10,00</span></div>',
+        "",
+    )
+
+    document = SefazSpNfceParser().parse(html)
+
+    assert document.gross_items_amount == "10,00"
+    assert document.payable_amount == "10,00"
+
+
 def test_cancelled_document_can_be_classified_without_item_table(sefaz_html: str) -> None:
     html = sefaz_html.replace("EMISSÃO NORMAL", "EMISSÃO CANCELADA")
     html = html.replace('<table id="tabResult">', '<table id="otherTable">')
