@@ -71,6 +71,25 @@ def test_uses_zxing_when_legacy_decoder_finds_no_code(monkeypatch) -> None:
     assert result.url == payload
 
 
+def test_uses_upscaled_rotated_image_with_zxing(monkeypatch) -> None:
+    payload = "https://www.nfce.fazenda.sp.gov.br/qrcode?p=opaque"
+    monkeypatch.setattr("marketracking.services.qr_service.decode", lambda *_args, **_kwargs: [])
+
+    def decode_rotated(image, **_kwargs):
+        if image.size == (64, 96):
+            return [SimpleNamespace(text=payload)]
+        return []
+
+    monkeypatch.setattr(
+        "marketracking.services.qr_service.zxingcpp.read_barcodes",
+        decode_rotated,
+    )
+
+    result = decode_qr_bytes(png_bytes())
+
+    assert result.url == payload
+
+
 def test_rejects_multiple_qrs_found_by_zxing(monkeypatch) -> None:
     symbols = [SimpleNamespace(text="first"), SimpleNamespace(text="second")]
     monkeypatch.setattr("marketracking.services.qr_service.decode", lambda *_args, **_kwargs: [])

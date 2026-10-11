@@ -130,27 +130,38 @@ def decode_qr_bytes(
 
 
 def _decode_with_zxing(image: Image.Image) -> tuple[set[str], bool]:
-    gray = ImageOps.autocontrast(ImageOps.grayscale(image))
-    variants = (
-        image.convert("RGB"),
-        gray,
-        gray.filter(ImageFilter.UnsharpMask(radius=2, percent=180, threshold=3)),
-    )
     payloads: set[str] = set()
     multiple = False
-    for variant in variants:
-        for binarizer in (zxingcpp.Binarizer.LocalAverage, zxingcpp.Binarizer.GlobalHistogram):
-            results = zxingcpp.read_barcodes(
-                variant,
-                formats=zxingcpp.BarcodeFormat.QRCode,
-                binarizer=binarizer,
+    for rotation in (0, 90, 180, 270):
+        oriented = image.rotate(rotation, expand=True) if rotation else image
+        gray = ImageOps.autocontrast(ImageOps.grayscale(oriented))
+        variants = (
+            oriented.convert("RGB"),
+            gray,
+            gray.filter(ImageFilter.UnsharpMask(radius=2, percent=180, threshold=3)),
+            ImageEnhance.Contrast(gray).enhance(2.5),
+        )
+        for variant in variants:
+            enlarged = variant.resize(
+                (variant.width * 2, variant.height * 2),
+                Image.Resampling.LANCZOS,
             )
-            if len(results) > 1:
-                multiple = True
-            for result in results:
-                payload = result.text.strip()
-                if payload:
-                    payloads.add(payload)
+            for candidate in (variant, enlarged):
+                for binarizer in (
+                    zxingcpp.Binarizer.LocalAverage,
+                    zxingcpp.Binarizer.GlobalHistogram,
+                ):
+                    results = zxingcpp.read_barcodes(
+                        candidate,
+                        formats=zxingcpp.BarcodeFormat.QRCode,
+                        binarizer=binarizer,
+                    )
+                    if len(results) > 1:
+                        multiple = True
+                    for result in results:
+                        payload = result.text.strip()
+                        if payload:
+                            payloads.add(payload)
     return payloads, multiple
 
 
