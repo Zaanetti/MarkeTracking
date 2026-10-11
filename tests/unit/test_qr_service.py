@@ -1,7 +1,9 @@
 from io import BytesIO
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
+import zxingcpp
 from PIL import Image
 
 from marketracking.schemas.nfce import ErrorCode
@@ -9,10 +11,26 @@ from marketracking.services.errors import ProcessingFailure
 from marketracking.services.qr_service import decode_qr_bytes
 
 
-def png_bytes() -> bytes:
+def png_bytes(image: Image.Image | None = None) -> bytes:
     stream = BytesIO()
-    Image.new("RGB", (48, 32), "white").save(stream, format="PNG")
+    if image is None:
+        image = Image.new("RGB", (48, 32), "white")
+    image.save(stream, format="PNG")
     return stream.getvalue()
+
+
+def faded_qr_image(payload: str) -> Image.Image:
+    barcode = zxingcpp.create_barcode(payload, zxingcpp.BarcodeFormat.QRCode)
+    bitmap = np.asarray(zxingcpp.write_barcode_to_image(barcode, scale=7))
+    rng = np.random.default_rng(17)
+    ink = bitmap < 128
+    holes = ink & (rng.random(bitmap.shape) < 0.20)
+    reflectance = np.where(ink & ~holes, 95, 225).astype(np.float32)
+    shadow = np.linspace(0.30, 1, bitmap.shape[1], dtype=np.float32)
+    faded = np.clip(
+        reflectance * shadow[None, :] + rng.normal(0, 3, bitmap.shape), 0, 255
+    ).astype(np.uint8)
+    return Image.fromarray(faded)
 
 
 def test_rejects_invalid_image_content() -> None:
@@ -100,6 +118,37 @@ def test_rejects_multiple_qrs_found_by_zxing(monkeypatch) -> None:
 
     with pytest.raises(ProcessingFailure) as error:
         decode_qr_bytes(png_bytes())
+
+    assert error.value.code == ErrorCode.MULTIPLE_QR_CODES
+
+
+def test_recovers_fragmented_qr_under_uneven_lighting(monkeypatch) -> None:
+    payload = "https://www.nfce.fazenda.sp.gov.br/qrcode?p=synthetic-thermal-print"
+    image = faded_qr_image(payload)
+    monkeypatch.setattr("marketracking.services.qr_service.build_variants", lambda _image: [])
+    monkeypatch.setattr(
+        "marketracking.services.qr_service._decode_with_zxing", lambda _image: (set(), False)
+    )
+
+    result = decode_qr_bytes(png_bytes(image))
+
+    assert result.url == payload
+    assert (result.image.width, result.image.height) == image.size
+
+
+def test_rejects_multiple_qrs_recovered_from_faded_image(monkeypatch) -> None:
+    first = faded_qr_image("https://www.nfce.fazenda.sp.gov.br/qrcode?p=synthetic-first")
+    second = faded_qr_image("https://www.nfce.fazenda.sp.gov.br/qrcode?p=synthetic-second")
+    combined = Image.new("L", (first.width + second.width + 32, max(first.height, second.height)), 255)
+    combined.paste(first, (0, 0))
+    combined.paste(second, (first.width + 32, 0))
+    monkeypatch.setattr("marketracking.services.qr_service.build_variants", lambda _image: [])
+    monkeypatch.setattr(
+        "marketracking.services.qr_service._decode_with_zxing", lambda _image: (set(), False)
+    )
+
+    with pytest.raises(ProcessingFailure) as error:
+        decode_qr_bytes(png_bytes(combined))
 
     assert error.value.code == ErrorCode.MULTIPLE_QR_CODES
 

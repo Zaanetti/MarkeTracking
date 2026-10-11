@@ -5,9 +5,11 @@ import warnings
 from dataclasses import dataclass
 from io import BytesIO
 
+import cv2
+import numpy as np
+import zxingcpp
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, UnidentifiedImageError
 from pyzbar.pyzbar import ZBarSymbol, decode
-import zxingcpp
 
 from marketracking.schemas.nfce import ErrorCode, ProcessingState
 from marketracking.services.errors import ProcessingFailure
@@ -21,6 +23,7 @@ SUPPORTED_FORMATS = {
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_DIMENSION = 10_000
 MAX_IMAGE_PIXELS = 40_000_000
+MAX_RECOVERY_DIMENSION = 1600
 
 
 @dataclass(frozen=True)
@@ -92,6 +95,10 @@ def decode_qr_bytes(
                 fallback_payloads, fallback_multiple = _decode_with_zxing(image)
                 payloads.update(fallback_payloads)
                 multiple_in_variant = multiple_in_variant or fallback_multiple
+            if not payloads:
+                recovered_payloads, recovered_multiple = _decode_with_local_thresholds(image)
+                payloads.update(recovered_payloads)
+                multiple_in_variant = multiple_in_variant or recovered_multiple
     except UnicodeDecodeError as exc:
         raise ProcessingFailure(
             ErrorCode.QR_UNDECODABLE,
@@ -162,6 +169,42 @@ def _decode_with_zxing(image: Image.Image) -> tuple[set[str], bool]:
                         payload = result.text.strip()
                         if payload:
                             payloads.add(payload)
+    return payloads, multiple
+
+
+def _decode_with_local_thresholds(image: Image.Image) -> tuple[set[str], bool]:
+    """Recover fragmented thermal-print modules under uneven illumination."""
+    reduced = image.convert("RGB")
+    reduced.thumbnail(
+        (MAX_RECOVERY_DIMENSION, MAX_RECOVERY_DIMENSION), Image.Resampling.LANCZOS
+    )
+    gray = cv2.cvtColor(np.asarray(reduced), cv2.COLOR_RGB2GRAY)
+    kernel = np.ones((2, 2), dtype=np.uint8)
+    sources = (gray, cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(gray))
+    payloads: set[str] = set()
+    multiple = False
+    for source in sources:
+        _, otsu = cv2.threshold(source, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+        thresholds = (otsu,) + tuple(
+            cv2.adaptiveThreshold(
+                source, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, block, 2
+            )
+            for block in (31, 55, 81)
+        )
+        for binary in thresholds:
+            # White-mask erosion fills small gaps in the dark printed modules.
+            candidates = (
+                binary,
+                cv2.erode(binary, kernel),
+                cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel),
+            )
+            for candidate in candidates:
+                results = decode(candidate, symbols=[ZBarSymbol.QRCODE])
+                multiple = multiple or len(results) > 1
+                for result in results:
+                    payload = result.data.decode("utf-8", errors="strict").strip()
+                    if payload:
+                        payloads.add(payload)
     return payloads, multiple
 
 
