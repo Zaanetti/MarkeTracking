@@ -100,6 +100,7 @@ class IssuedStoreDetailsData(BaseModel):
 class FiscalDocumentData(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+    fiscal_document_id: UUID | None = None
     access_key: str = Field(pattern=r"^\d{44}$")
     number: str = Field(min_length=1, max_length=32)
     series: str = Field(min_length=1, max_length=16)
@@ -120,6 +121,7 @@ class FiscalDocumentData(BaseModel):
 class PurchaseItemData(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+    item_id: UUID | None = None
     line_number: int = Field(ge=1)
     store_product_code: str | None = Field(default=None, max_length=120)
     description: str = Field(min_length=1, max_length=512)
@@ -142,6 +144,7 @@ class PurchaseTotalData(BaseModel):
 class PurchaseData(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+    purchase_id: UUID | None = None
     fiscal_document: FiscalDocumentData
     store: StoreData
     issued_store_details: IssuedStoreDetailsData
@@ -176,6 +179,7 @@ class ProcessingTrace(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     processamento_id: UUID
+    purchase_id: UUID | None = None
     capture_method: CaptureMethod
     state: ProcessingState
     result: ProcessingOutcome | None = None

@@ -56,6 +56,12 @@ def test_process_creates_then_returns_existing_purchase(
         assert created_data["result"] == "created"
         assert created_data["already_processed"] is False
         assert created_data["purchase"]["total"]["payable_amount"] == "10.00"
+        created_purchase_id = created_data["purchase"]["purchase_id"]
+        created_document_id = created_data["purchase"]["fiscal_document"]["fiscal_document_id"]
+        created_item_ids = [item["item_id"] for item in created_data["purchase"]["items"]]
+        assert created_purchase_id
+        assert created_document_id
+        assert len(created_item_ids) == 1
         assert "consumer" not in str(created_data).lower()
         assert "123.456.789-00" not in str(created_data)
         assert "opaque%7Cconsultation-data" not in str(created_data)
@@ -63,6 +69,9 @@ def test_process_creates_then_returns_existing_purchase(
         assert existing.status_code == 200
         assert existing.json()["result"] == "existing"
         assert existing.json()["already_processed"] is True
+        assert existing.json()["purchase"]["purchase_id"] == created_purchase_id
+        assert existing.json()["purchase"]["fiscal_document"]["fiscal_document_id"] == created_document_id
+        assert [item["item_id"] for item in existing.json()["purchase"]["items"]] == created_item_ids
 
         processing_id = created_data["processamento_id"]
         trace = client.get(f"/api/v1/processings/{processing_id}")
@@ -72,6 +81,7 @@ def test_process_creates_then_returns_existing_purchase(
         assert trace_data["input_metadata"]["access_key"] == created_data["purchase"][
             "fiscal_document"
         ]["access_key"]
+        assert trace_data["purchase_id"] == created_purchase_id
         assert "opaque" not in str(trace_data)
         assert any(step["stage"] == "CONSULTANDO_PORTAL" for step in trace_data["steps"])
 
@@ -80,6 +90,7 @@ def test_process_creates_then_returns_existing_purchase(
         assert cancelled.status_code == 200
         assert cancelled.json()["result"] == "cancelled_existing"
         assert cancelled.json()["purchase"]["fiscal_document"]["status"] == "cancelled"
+        assert cancelled.json()["purchase"]["purchase_id"] == created_purchase_id
 
         with session_factory() as session:
             assert session.scalar(select(func.count()).select_from(Purchase)) == 1

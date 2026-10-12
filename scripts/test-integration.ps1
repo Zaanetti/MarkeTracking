@@ -79,6 +79,10 @@ try {
     Write-Host "Applying migrations to the disposable database..."
     python -m alembic upgrade head
     if ($LASTEXITCODE -ne 0) { throw "Alembic migration failed." }
+    python -m alembic downgrade -1
+    if ($LASTEXITCODE -ne 0) { throw "Alembic downgrade validation failed." }
+    python -m alembic upgrade head
+    if ($LASTEXITCODE -ne 0) { throw "Alembic re-upgrade validation failed." }
 
     Write-Host "Running the complete test suite, including PostgreSQL and MinIO integration tests..."
     python -m pytest -q

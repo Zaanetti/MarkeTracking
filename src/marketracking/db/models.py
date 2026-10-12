@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     Enum as SqlEnum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -60,6 +61,7 @@ class TimestampMixin:
 
 class Processing(TimestampMixin, Base):
     __tablename__ = "processing_records"
+    __table_args__ = (Index("ix_processing_records_created_at_id", "created_at", "id"),)
 
     id: Mapped[PyUUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
     capture_method: Mapped[CaptureMethod] = mapped_column(CAPTURE_METHOD_ENUM, nullable=False)
@@ -73,6 +75,9 @@ class Processing(TimestampMixin, Base):
     input_host: Mapped[str | None] = mapped_column(String(255))
     input_access_key: Mapped[str | None] = mapped_column(String(44))
     input_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    purchase_id: Mapped[PyUUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("purchases.id", ondelete="SET NULL"), index=True
+    )
     image_media_type: Mapped[str | None] = mapped_column(String(32))
     image_size_bytes: Mapped[int | None] = mapped_column(Integer)
     image_width: Mapped[int | None] = mapped_column(Integer)
@@ -96,6 +101,7 @@ class Processing(TimestampMixin, Base):
     failed_html: Mapped[FailedHtmlArtifact | None] = relationship(
         back_populates="processing", cascade="all, delete-orphan", uselist=False
     )
+    purchase: Mapped[Purchase | None] = relationship(back_populates="processings")
 
 
 class ProcessingStep(Base):
@@ -138,6 +144,7 @@ class Store(TimestampMixin, Base):
 
 class FiscalDocument(TimestampMixin, Base):
     __tablename__ = "fiscal_documents"
+    __table_args__ = (Index("ix_fiscal_documents_issued_at_id", "issued_at", "id"),)
 
     id: Mapped[PyUUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
     access_key: Mapped[str] = mapped_column(String(44), nullable=False, unique=True)
@@ -195,12 +202,19 @@ class Purchase(TimestampMixin, Base):
     total: Mapped[PurchaseTotal] = relationship(
         back_populates="purchase", cascade="all, delete-orphan", uselist=False
     )
+    processings: Mapped[list[Processing]] = relationship(back_populates="purchase")
 
 
 class PurchaseItem(Base):
     __tablename__ = "purchase_items"
     __table_args__ = (
         UniqueConstraint("purchase_id", "line_number", name="uq_purchase_items_line_number"),
+        Index(
+            "ix_purchase_items_code_unit_purchase",
+            "store_product_code",
+            "commercial_unit",
+            "purchase_id",
+        ),
     )
 
     id: Mapped[PyUUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)

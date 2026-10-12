@@ -36,6 +36,14 @@ The API is available at `http://localhost:8000`; interactive API documentation i
 - `POST /api/v1/nfce/process` accepts `multipart/form-data` with exactly one `url` field or one
   `image` file field.
 - `GET /api/v1/processings/{processamento_id}` returns safe execution metadata and stage history.
+- Query endpoints provide purchases, purchase lines, stores, processing summaries, spending and
+  price reports, plus overview, item, price-change and processing dashboards. Their filters,
+  identity rules, date semantics and response fields are documented in
+  [Query API v1](docs/api-query-v1.md).
+
+The query endpoints are read-only and use stored PostgreSQL data. Financial aggregates and price
+comparisons exclude cancelled records; purchase and line listings default to including them for
+historical traceability. OpenAPI documents are served at `/docs`.
 
 Successful first processing returns `201`; an existing document returns `200`. Invalid or
 inconsistent input returns `422`; a missing document returns `404`; a newly observed cancellation

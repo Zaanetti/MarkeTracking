@@ -191,6 +191,7 @@ def persist_authorized_purchase(
                     raise _persistence_failure(None)
                 processing.state = ProcessingState.COMPLETED
                 processing.outcome = ProcessingOutcome.EXISTING
+                processing.purchase_id = existing.id
                 _finish_processing(processing)
                 db.commit()
                 return _purchase_data(existing), True
@@ -215,6 +216,7 @@ def persist_authorized_purchase(
                     raise _persistence_failure(exc) from exc
                 processing.state = ProcessingState.COMPLETED
                 processing.outcome = ProcessingOutcome.EXISTING
+                processing.purchase_id = winner.id
                 _finish_processing(processing)
                 try:
                     db.commit()
@@ -251,6 +253,7 @@ def complete_existing_processing(
         raise _persistence_failure(None)
     processing.state = ProcessingState.COMPLETED
     processing.outcome = ProcessingOutcome.EXISTING
+    processing.purchase_id = purchase.id
     _finish_processing(processing)
     try:
         db.commit()
@@ -295,6 +298,7 @@ def mark_existing_purchase_cancelled(
         raise _persistence_failure(None)
     processing.state = ProcessingState.COMPLETED
     processing.outcome = ProcessingOutcome.CANCELLED_EXISTING
+    processing.purchase_id = document.purchase.id
     _finish_processing(processing)
     try:
         db.commit()
@@ -388,6 +392,7 @@ def get_processing_trace(db: Session, processing_id: UUID) -> ProcessingTrace | 
         )
     return ProcessingTrace(
         processamento_id=processing.id,
+        purchase_id=processing.purchase_id,
         capture_method=processing.capture_method,
         state=processing.state,
         result=processing.outcome,
@@ -495,6 +500,7 @@ def _insert_purchase(db: Session, processing_id: UUID, data: PurchaseData) -> Pu
     _finish_processing(processing)
     db.add(purchase)
     db.flush()
+    processing.purchase_id = purchase.id
     return purchase
 
 
@@ -518,7 +524,9 @@ def _purchase_data(purchase: Purchase) -> PurchaseData:
     if document is None or store is None or purchase.total is None:
         raise _persistence_failure(None)
     return PurchaseData(
+        purchase_id=purchase.id,
         fiscal_document=FiscalDocumentData(
+            fiscal_document_id=document.id,
             access_key=document.access_key,
             number=document.number,
             series=document.series,
@@ -542,6 +550,7 @@ def _purchase_data(purchase: Purchase) -> PurchaseData:
         ),
         items=[
             PurchaseItemData(
+                item_id=item.id,
                 line_number=item.line_number,
                 store_product_code=item.store_product_code,
                 description=item.description,
